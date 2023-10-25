@@ -1,60 +1,99 @@
-from decouple import config
+from typing import Final
 from telegram import Update
-from telegram.ext import Application, CommandHandler, filters, ContextTypes
-import time 
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import time
 import requests
+from decouple import config
+import os
+from dotenv import load_dotenv
 
-BOT_TOKEN = config('BOT_TOKEN')
+load_dotenv()
+
+TOKEN: Final = os.getenv('BOT_TOKEN')
+
+BOT_USERNAME: Final = "@ATF_verse_bot"
+
 URL = "https://bible-api.com/"
 
-
-#basic intro when the user enters hits start
+#Commands
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = time.localtime()
 
     hour = t.tm_hour
 
     if 5 <= hour < 12:
-        greeting = "Hello, {update.message.chat.id} good morning"
+        greeting = "Hello, {update.message.chat.username} good morning"
     elif 12 <= hour < 17:
-        greeting = f"Hello, {update.message.chat.id} good afternoon"
+        greeting = f"Hello, {update.message.chat.username} good afternoon"
+        
     else:
-        greeting = "Hello, {update.message.chat.id} good evening"
-    await update.message.reply_text(f"{greeting}, How are you today? I am a bot that gives you any Bible verse you want")
+        greeting = "Hello, {update.message.chat.username} good evening"
+    
+    await update.message.reply_text(f"{greeting}, How are you today? I am a bot that gives you any Bible verse that you request for.Just enter the verse you want and I will send it to you.")
 
-#responses
-def handle_response(text: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("i am just a test bot")
+
+async def custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("This is a custom command")
+
+
+
+#Responses
+def handle_response(text: str) -> str:
     processed: str = text.lower()
 
-    if str in processed:
-        response = requests.get(URL + processed)
-        response.raise_for_status()
-        response_json = response.json()
-        return response_json
+    verse = URL + processed
 
-#functions that gets verse the user wants and extracts its for them
-async def verse_getter(verse: str) -> str:
-    verse = Update.message.text.split('/verse_getter ')[1]
-    verse = verse.lower()  # Remove the duplicate variable assignment
-    print("What verse do you want")
-    # Use try-except to handle exceptions when making HTTP requests
-    try:
-        response = requests.get(URL + verse)
-        response.raise_for_status()  # Check for HTTP errors
+
+    response = requests.get(verse)
+    if response.status_code == 200:
         response_json = response.json()
-        await Update.message.reply_text(f"{response_json['text']}")
-    except requests.exceptions.RequestException as e:
-        # Handle exceptions (e.g., network errors, invalid URLs, etc.)
-        print(f"Error: {e}")
-  
- 
+    else:
+        return "You entered an incorrect verse"
+
+
+    return (f"{response_json['text']}")
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_type = update.message.chat.type
+    text: str = update.message.text
+
+    print(f'User ({update.message.chat.id}) in {message_type}: {text}')
+
+    if message_type == 'group':
+        if BOT_USERNAME in text:
+            new_text: str = text.replace(BOT_USERNAME, '').strip()
+            response: str = handle_response(new_text)
+        else:
+            return
+    else:
+        response: str = handle_response(text)
+
+    print('Bot', response)
+    await update.message.reply_text(response)
+
+
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f'Update {update} caused error {context.error}')
+
+
+
 if __name__ == '__main__':
-    print("Bot starting...")
-    app = Application.builder().token(BOT_TOKEN).build()
+    print('Starting...')
+    app = Application.builder().token(TOKEN).build()
 
     #commands
     app.add_handler(CommandHandler('start',start_command))
-    app.add_handler(CommandHandler('verse_getter',handle_response))
-    
-    print("Polling")
-    app.run_polling(poll_interval=3)
+    app.add_handler(CommandHandler('help',help_command))
+
+    #Messages
+    app.add_handler(MessageHandler(filters.TEXT,handle_message))
+
+    #Error handlers
+    app.add_error_handler(error)
+
+    print('Polling...')
+    app.run_polling()
